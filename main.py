@@ -24,37 +24,11 @@ Bonus points
 
 """
 
-"""
-Dag airflow ou Lambda
-Fazer cópia de dados para outro bucket
-Classe para cada um dos tipos de dados
-Arquivos separados
-Arquivo comum com lógica de ingestão de json
-Arquivo de dag
-Arquivo de Lambda com o tratamento por recebimento de novo arquivo no bucket 
-
-
-Ingestão
-Lambda de cópia, para garantir dado na mesma localização 
-Planejar para ingestão manual
-
-Considerando que cada arquivo vai ser do dia do evento, e se for necessário reprocessar, só vai ser daquele dia 
-
-Lógica de ETL:
-
-Descartar fora de período de operação 
-Soma de vetores
-Armazenar somente distância viajada em cada período, talvez granularizar por minuto ou hora
-
-Considerar casos onde período ou começou e não terminou, ou terminou e não começou 
-
-"""
-
 import os
 import sys
 import awswrangler as wr
 
-from datetime import datetime
+from datetime import date
 from pyspark.sql import SparkSession, DataFrame
 from pyspark.sql.functions import to_timestamp, udf, struct
 from pyspark.sql.types import FloatType
@@ -111,9 +85,8 @@ def save_files_to_datalake(events_folder: str):
     all_files = os.listdir(events_folder)
     for event_file in all_files:
         local_path = f"{os.path.normpath(events_folder)}/{event_file}"
-        s3_path = (
-            f"s3://{dw_data_bucket}/{dw_data_prefix}/{datetime.today()}/{event_file}"
-        )
+        s3_path = f"s3://{dw_data_bucket}/{dw_data_prefix}/{date.today().isoformat()}/{event_file}"
+        print(f"Uploading {event_file}")
         wr.s3.upload(local_file=local_path, path=s3_path)
 
 
