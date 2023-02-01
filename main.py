@@ -26,6 +26,7 @@ Bonus points
 
 import os
 import sys
+import shutil
 import awswrangler as wr
 
 from datetime import date
@@ -92,7 +93,7 @@ def save_files_to_datalake(events_folder: str):
 
 def delete_tmp_folder(events_folder: str):
     try:
-        os.rmdir(events_folder)
+        shutil.rmtree(events_folder)
         print(f"Deleted temporary folder {events_folder}")
     except Exception as e:
         print(f"Error while deleting  {events_folder}: {e}")
@@ -167,6 +168,7 @@ def get_vehicles_events_during_operating_hours(
 
 
 def save_dataframe_to_postgres(df: DataFrame, table_name: str):
+    print(f"Saving data in {table_name}")
     pdf = df.toPandas()
     pdf.to_sql(table_name, engine, index=False, if_exists="append")
 
