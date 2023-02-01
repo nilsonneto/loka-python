@@ -1,0 +1,19 @@
+version: "3"
+
+services:
+  postgres-dw:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: datawarehouse
+      POSTGRES_PASSWORD: datawarehouse
+      POSTGRES_DB: datawarehouse
+    volumes:
+      - postgres-dw-db-volume:/var/lib/postgresql/datawarehouse
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "datawarehouse"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+volumes:
+  postgres-dw-db-volume:
