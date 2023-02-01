@@ -49,19 +49,24 @@ Armazenar somente distância viajada em cada período, talvez granularizar por m
 Considerar casos onde período ou começou e não terminou, ou terminou e não começou 
 
 """
+
 import os
-import boto3
 import awswrangler as wr
-from datetime import datetime
+
 from geopy.distance import geodesic
+from pyspark.sql import SparkSession, DataFrame
+from pyspark.sql.functions import to_timestamp, udf, struct
 from pyspark.sql.types import FloatType
-import pyspark.sql.functions as F
-from pyspark.sql import SparkSession
+from sqlalchemy import create_engine
 
 raw_data_bucket = "de-tech-assessment-2022"
 raw_data_prefix = "data"
+timestamp_format = "yyyy-MM-dd'T'HH:mm:ss.SSSX"
 
 spark = SparkSession.builder.appName("Loka Application").getOrCreate()
+engine = create_engine(
+    "postgresql+psycopg2://datawarehouse:datawarehouse@localhost/datawarehouse?client_encoding=utf8"
+)
 
 
 def get_s3_paths(prefix: str) -> list[str]:
@@ -87,21 +92,53 @@ def download_only_new_files(file_list: list[str]) -> str:
     return folder
 
 
-@F.udf(returnType=FloatType())
+@udf(returnType=FloatType())
 def geodesic_udf(a, b):
     return geodesic(a, b).km
 
 
-def get_events_from_date(event_date: str = ""):
+def get_events_from_date(event_date: str = "") -> str:
+    """
+    Downloads events of a certain date to local folder.
+
+    :param event_date: Date of events that should be downloaded
+    :returns: Folder where events were stored
+    """
     event_list = get_s3_paths(event_date)
     events_folder = download_only_new_files(event_list)
+    return events_folder
 
-    for ff in os.listdir(events_folder):
-        pass
-        # df = df.withColumn(
-        # "Lengths/m", geodesic_udf(F.array("B", "A"), F.array("D", "C"))
-        # )
-        # df.show()
+
+def read_events_into_dataframe(events_folder: str) -> DataFrame:
+    df = spark.read.option("mergeSchema", "true").json(f"{events_folder}/*")
+    return df
+
+
+def fix_dataframe_dates(df: DataFrame) -> DataFrame:
+    df = (
+        df.withColumn("at", to_timestamp(df.at, timestamp_format))
+        .withColumn("date_start", to_timestamp(df.data.start, timestamp_format))
+        .withColumn("date_finish", to_timestamp(df.data.finish, timestamp_format))
+        .withColumn("location_at", to_timestamp(df.data.location.at, timestamp_format))
+        .withColumn(
+            "data",
+            struct(
+                "data.*",
+                "date_start",
+                "date_finish",
+                "location_at",
+            ),
+        )
+        .drop("date_start")
+        .drop("date_finish")
+        .drop("location_at")
+    )
+    return df
+
+
+def save_dataframe_to_postgres(df: DataFrame, table_name: str):
+    pdf = df.toPandas()
+    pdf.to_sql(table_name, engine, index=False, if_exists="append")
 
 
 # read event
@@ -111,9 +148,28 @@ def get_events_from_date(event_date: str = ""):
 
 
 if __name__ == "__main__":
-    get_events_from_date("2019-06-01")
-    get_events_from_date()
-    df = spark.read.json("/tmp/loka-data")
-    df.show()
+    events_folder = get_events_from_date("2019-06-01")
+    # Store data on S3
+    # get_events_from_date()
+    df = read_events_into_dataframe(events_folder)
+    df = fix_dataframe_dates(df)
+
+    df_vehicle = (
+        df.where(df.on == "vehicle")
+        .withColumn("data_id", df.data.id)
+        .withColumn("location_at", df.data.location_at)
+        .withColumn("location_lat", df.data.location.lat)
+        .withColumn("location_lng", df.data.location.lng)
+        .drop(df.data)
+    )
+    df_operating_period = (
+        df.where(df.on == "operating_period")
+        .withColumn("data_id", df.data.id)
+        .withColumn("date_start", df.data.date_start)
+        .withColumn("date_finish", df.data.date_finish)
+        .drop(df.data)
+    )
+    save_dataframe_to_postgres(df_vehicle, "vehicle")
+    save_dataframe_to_postgres(df_operating_period, "operating_period")
     # Displays the content of the DataFrame to stdout
     # df = df.withColumn("Lengths/m", geodesic_udf(F.array("B", "A"), F.array("D", "C")))
